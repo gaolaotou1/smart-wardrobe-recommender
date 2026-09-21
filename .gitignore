@@ -39,3 +39,4 @@ coverage
 # Runtime-generated images
 backend/static/uploads/
 backend/static/processed/
+data/

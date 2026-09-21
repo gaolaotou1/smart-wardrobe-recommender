@@ -9,8 +9,8 @@ Smart Wardrobe Recommender 是一个面向个人已有衣物的智能衣橱与�
 - **个人动态知识库**：衣物随用户的上传、编辑和删除实时变化，问答始终基于当前衣橱。
 - **上传质量控制**：自训练 ResNet-50 二分类模型过滤非服装图片，感知哈希与汉明距离用于识别相似图片。
 - **统一服装语义**：以电商筛选维度和穿搭理论为参考，建立七维服装标签体系，将图像转换为可检索的结构化属性。
-- **多模态穿搭问答**：支持纯文本问题、选中衣橱衣物提问，以及附加新图片的图文混合问题。
-- **意图化提示工程**：针对搭配咨询、信息查询和单品评价设计不同策略，将回答范围限制在用户选中的衣物中。
+- **受限问答 Agent**：LangGraph 编排衣橱查询、穿搭推荐、图片分析、服饰知识和穿搭管理五条链路。
+- **可验证事实链**：大模型只产生 QuerySpec，参数化 SQL、用户隔离、证据校验和写操作确认由程序强制执行。
 
 ## 核心功能
 
@@ -19,7 +19,7 @@ Smart Wardrobe Recommender 是一个面向个人已有衣物的智能衣橱与�
 | 用户登录 | 注册、登录与用户数据隔离 |
 | 我的数据 | 衣物总数、当月新增、穿搭次数、类别/季节/风格分布等可视化 |
 | 虚拟衣柜 | 衣物上传、AI 属性分析、搜索筛选、编辑与删除 |
-| 服装问答 | 结合所选衣物、文本和附加图片生成穿搭建议 |
+| 服装问答 | 无需全选衣物，通过 QuerySpec 按需查询并以 SSE 返回结构化回答 |
 | 穿搭管理 | 选择上下装、预览效果、保存、修改与删除穿搭 |
 
 ## 知识库构建流程
@@ -46,16 +46,20 @@ flowchart TB
     UI[用户界面层<br/>Vue 3 + TypeScript + Element Plus]
     APP[应用逻辑层<br/>Router / Reactive State / Forms]
     DATA[数据交互层<br/>Axios / REST API / File Upload]
-    BIZ[业务逻辑层<br/>Flask / Wardrobe / Outfit / Q&A]
+    BIZ[业务逻辑层<br/>Flask / Wardrobe / Outfit]
+    AGENT[Agent Service<br/>FastAPI / LangGraph]
     STORE[数据存储层<br/>MySQL / Image Files]
-    SERVICES[第三方服务层<br/>Doubao Ark / Superbed]
+    SERVICES[外部能力层<br/>Doubao Ark / DeepSeek / Open-Meteo]
 
     UI --> APP --> DATA --> BIZ
+    DATA --> AGENT
     BIZ --> STORE
     BIZ --> SERVICES
+    AGENT --> STORE
+    AGENT --> SERVICES
 ```
 
-智能问答部分另外划分为用户交互、业务逻辑、服装知识库和 AI 推理四个核心层次。后端会将用户问题、所选衣物属性、衣物图片和可选附件整合为结构化上下文，再调用多模态模型生成文本或图文混合回答。
+智能问答由独立 Agent Service 运行：DeepSeek 负责结构化路由、候选复核和文本回答，豆包 Seed 2.0 Lite 仅处理需要视觉理解的附图，MySQL 是个人衣橱事实源。
 
 ## 服装二分类模型
 
@@ -85,8 +89,9 @@ flowchart TB
 | --- | --- |
 | 前端 | Vue 3、TypeScript、Vite、Element Plus、ECharts、Axios、html2canvas |
 | 后端 | Flask、PyMySQL、OpenCV、Pillow、rembg |
-| 模型 | PyTorch、TorchVision、ResNet-50、火山方舟豆包多模态模型 |
-| 数据 | MySQL、感知哈希、Superbed 图像存储 |
+| Agent | FastAPI、LangGraph、Pydantic、SQLite Checkpointer |
+| 模型 | DeepSeek 文本模型、豆包 Seed 2.0 Lite、PyTorch ResNet-50 |
+| 数据 | MySQL、感知哈希、本地用户隔离图像存储 |
 
 ## 目录结构
 
@@ -96,6 +101,8 @@ flowchart TB
 │   ├── app.py                  # Flask API、图像处理与模型推理
 │   ├── requirements.txt        # Python 依赖
 │   └── static/                 # 运行时图片，不提交
+├── agent_service/                 # FastAPI、LangGraph、QuerySpec、推荐、记忆
+├── migrations/                    # Agent V2 旁路表与约束
 ├── database/
 │   └── schema.sql              # MySQL 建表脚本
 ├── frontend/
@@ -111,6 +118,8 @@ flowchart TB
 
 ## 本地运行
 
+设计条款与实现/测试的逐项对照见 [`docs/Agent-V2实现验收清单.md`](docs/Agent-V2实现验收清单.md)。
+
 ### 1. 准备环境
 
 建议使用 Node.js 20+、Python 3.10 和 MySQL 8.0。
@@ -119,9 +128,11 @@ flowchart TB
 git clone https://github.com/gaolaotou1/smart-wardrobe-recommender.git
 cd smart-wardrobe-recommender
 
-conda create -n smart-wardrobe python=3.10 -y
-conda activate smart-wardrobe
+conda activate tf_m1
 pip install -r backend/requirements.txt
+
+conda activate hello_agent
+pip install -r agent_service/requirements.txt
 
 cd frontend
 npm install
@@ -135,9 +146,23 @@ macOS Apple Silicon 如果安装 PyTorch 时出现兼容问题，请按 [PyTorch
 ```bash
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS fashion_system CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
 mysql -u root -p fashion_system < database/schema.sql
+conda run -n hello_agent python scripts/apply_agent_migration.py
+conda run -n hello_agent python scripts/apply_agent_migration.py 002_outfit_unique_constraint.sql
+conda run -n hello_agent python scripts/apply_agent_migration.py 003_action_decision_id.sql
 ```
 
 首次启动后可在登录页注册新账号。
+
+已有数据库升级 Agent V2 时，必须先做预检和备份，再执行同两个迁移：
+
+```bash
+conda activate hello_agent
+python scripts/agent_v2_preflight.py
+python scripts/backup_agent_database.py
+python scripts/apply_agent_migration.py
+python scripts/apply_agent_migration.py 002_outfit_unique_constraint.sql
+python scripts/apply_agent_migration.py 003_action_decision_id.sql
+```
 
 ### 3. 配置环境变量
 
@@ -150,24 +175,50 @@ cp .env.example .env
 | 变量 | 用途 |
 | --- | --- |
 | `VITE_API_BASE_URL` | 前端访问的 Flask API 地址 |
+| `VITE_AGENT_API_BASE_URL` | 前端访问的 Agent API 地址 |
 | `FLASK_HOST` / `FLASK_PORT` | Flask 监听地址与端口 |
 | `DB_HOST` / `DB_PORT` | MySQL 地址与端口 |
 | `DB_USER` / `DB_PASSWORD` | MySQL 用户名与密码 |
 | `DB_NAME` | 数据库名称 |
+| `AGENT_DB_READ_USER` / `AGENT_DB_READ_PASSWORD` | Agent 衣橱事实的只读账号；本地未配置时回退 DB 账号 |
 | `ARK_API_URL` / `ARK_API_TOKEN` | 火山方舟多模态 API |
 | `ARK_MODEL` | 豆包模型 ID |
-| `SUPERBED_UPLOAD_URL` / `SUPERBED_TOKEN` | 图像存储服务 |
+| `DEEPSEEK_API_KEY` / `AGENT_MODEL` | DeepSeek 文本 Agent |
+| `JWT_SECRET` | Flask 和 Agent 共享的 JWT 签名密钥 |
+| `IMAGE_STORAGE_MODE` | 默认 `local`；只有明确设为 `superbed` 才使用旧图床 |
+| `AGENT_UPLOAD_DIR` / `AGENT_LOG_PATH` | Agent 用户隔离图片目录与持久 JSONL 链路日志 |
 | `CLOTHES_MODEL_PATH` | PyTorch 模型权重路径 |
 
-`.env` 已被 Git 忽略，`.env.example` 只包含可公开的配置模板。未配置外部 API 时，基础登录、衣橱查询和数据统计仍可使用，AI 属性分析、图床上传和穿搭问答需要相应 Token。
+`.env` 已被 Git 忽略。不要把 Key 写入命令行；可使用不回显的引导脚本：
+
+```bash
+conda activate hello_agent
+python scripts/configure_agent_env.py
+```
+
+如需替换已失效的 Key，使用 `python scripts/configure_agent_env.py --replace-keys`；脚本通过不回显输入写入本机 `.env`。
 
 ### 4. 启动后端
 
 ```bash
+conda activate tf_m1
 python backend/app.py
 ```
 
-默认 API 地址为 `http://127.0.0.1:8088`。第一次启动时，`rembg` 可能会下载去背景模型。
+新开一个终端启动 Agent：
+
+```bash
+conda activate hello_agent
+uvicorn agent_service.main:app --host 127.0.0.1 --port 8090
+```
+
+Flask 默认为 `http://127.0.0.1:8088`，Agent 默认为 `http://127.0.0.1:8090`。
+
+配置完成后也可一次启动三个进程：
+
+```bash
+bash scripts/start_local.sh
+```
 
 ### 5. 启动前端
 
@@ -177,6 +228,8 @@ npm run dev
 ```
 
 浏览器访问 `http://127.0.0.1:5173`。
+
+每次 Agent 调用都会在终端显示 `run_id → stage → tool/model → evidence → status`，并同步写入 `logs/agent.jsonl`。日志不记录令牌、完整提示词或用户正文。
 
 ## 主要 API
 
@@ -188,6 +241,11 @@ npm run dev
 | `PUT/DELETE` | `/api/clothes/:id` | 更新或删除衣物 |
 | `POST` | `/api/upload` | 衣物验证、去重、去背景与属性分析 |
 | `POST` | `/api/recommend` | 多模态穿搭问答 |
+| `POST` | `:8090/api/chat/v2/sessions` | 创建 Agent 会话 |
+| `POST` | `:8090/api/chat/v2/uploads` | 鉴权后上传一张本地图片并返回用户隔离的 `upload_id` |
+| `POST` | `:8090/api/chat/v2/sessions/:id/messages/stream` | SSE 问答 |
+| `POST` | `:8090/api/chat/v2/actions/:id/decision` | 确认/拒绝穿搭写操作 |
+| `POST` | `:8090/api/chat/v2/sessions/:id/cancel` | 取消当前会话的活动运行 |
 | `GET/POST` | `/api/outfits` | 查询或创建穿搭 |
 | `GET` | `/api/dashboard` | 仪表盘统计数据 |
 
@@ -198,13 +256,18 @@ cd frontend
 npm run build
 
 cd ..
-python -m py_compile backend/app.py
+conda run -n tf_m1 python -m py_compile backend/app.py
+conda run -n hello_agent python scripts/run_agent_smoke_tests.py
+conda run -n hello_agent python scripts/test_agent_e2e.py
+
+# 三个本地服务运行时，执行真实 DeepSeek/豆包/天气验收矩阵
+conda run -n hello_agent python scripts/test_agent_live.py
 ```
 
 ## 已知限制
 
-- 当前账号体系主要用于本地演示，密码未使用强哈希存储，不应直接用于生产环境。
-- 图片和问答内容会发送到所配置的第三方图床与多模态 API，请留意数据隐私与服务配额。
+- 旧明文密码会在首次成功登录后升级为强哈希；本地开发仍不等同于公网生产部署。
+- Agent 图片默认保存在本地用户隔离目录，仅在分析时发送给配置的豆包多模态 API；文本任务会发送给配置的文本模型，请留意数据隐私与服务配额。
 - 仓库包含约 90 MB 的模型权重。如果频繁更新模型，建议迁移到 Git LFS 或 GitHub Releases。
 - 论文中的实验数据来自特定数据集，不代表所有拍摄条件下的泛化表现。
 

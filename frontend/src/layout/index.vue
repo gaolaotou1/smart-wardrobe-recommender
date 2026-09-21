@@ -89,7 +89,10 @@ const toggleCollapse = () => {
 
 const handleLogout = () => {
   localStorage.removeItem('user')
+  localStorage.removeItem('userId')
   localStorage.removeItem('loginInfo')
+  localStorage.removeItem('wardrobeAgentSessionId')
+  sessionStorage.removeItem('token')
   router.push('/login')
   ElMessage.success('已安全退出')
 }
@@ -237,4 +240,4 @@ onMounted(() => {
   background-color: rgba(45, 90, 157, 0.1);
   color: #2d5a9d;
 }
-</style> 
+</style>

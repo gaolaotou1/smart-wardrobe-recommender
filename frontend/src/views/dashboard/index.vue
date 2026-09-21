@@ -342,10 +342,10 @@ const updatePage1Charts = (data: DashboardData) => {
         type: 'pie',
         radius: '50%',
         center: ['50%', '50%'], // 确保图表居中
-        data: data.seasonStats.map((item: any) => ({
-          name: seasonNames[item.season] || item.season,
+        data: data.seasonStats.map((item: { season: string; count: number }) => ({
+          name: seasonNames[item.season as keyof typeof seasonNames] || item.season,
           value: item.count,
-          itemStyle: { color: seasonColors[item.season] || '#999' }
+          itemStyle: { color: seasonColors[item.season as keyof typeof seasonColors] || '#999' }
         })),
         emphasis: {
           itemStyle: {

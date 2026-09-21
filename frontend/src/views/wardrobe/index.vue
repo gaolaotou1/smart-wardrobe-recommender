@@ -117,6 +117,14 @@
             <h3>{{ item.name }}</h3>
             <div class="tags">
               <el-tag size="small" type="info">{{ item.category }}</el-tag>
+              <el-tag
+                v-if="getSubCategory(item) && getSubCategory(item) !== item.category"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                {{ getSubCategory(item) }}
+              </el-tag>
               <el-tag size="small" type="success">{{ getSeasonName(item.season) }}</el-tag>
               <div class="occasion-tags">
                 <el-tag 
@@ -132,11 +140,17 @@
             <div class="details">
               <div class="detail-row">
                 <p v-if="item.brand"><span>品牌：</span>{{ item.brand }}</p>
-                <p><span>风格：</span>{{ item.style }}</p>
+                <p v-if="item.style"><span>风格：</span>{{ item.style }}</p>
               </div>
               <div class="detail-row">
-                <p><span>材质：</span>{{ item.material }}</p>
-                <p><span>厚度：</span>{{ item.thickness }}</p>
+                <p v-if="item.color">
+                  <span>主色：</span><i class="color-dot" :style="{ backgroundColor: getColorValue(item.color) }"></i>{{ item.color }}
+                </p>
+                <p v-if="getSpecificColor(item)"><span>具体颜色：</span>{{ getSpecificColor(item) }}</p>
+              </div>
+              <div class="detail-row">
+                <p v-if="item.material"><span>材质：</span>{{ item.material }}</p>
+                <p v-if="item.thickness"><span>厚度：</span>{{ item.thickness }}</p>
               </div>
             </div>
           </div>
@@ -499,6 +513,7 @@ const clothesForm = reactive<ClothesForm>({
   subCategory: '',
   brand: '',
   color: '',
+  subColor: '',
   colorName: '',
   season: '',
   occasions: [],
@@ -546,7 +561,7 @@ const uploadUrl = `${axios.defaults.baseURL}/api/upload`
 const uploadFiles = ref<{ raw: File }[]>([])
 const isProcessing = ref(false)
 const uploadHeaders = {
-  Authorization: localStorage.getItem('token') || '',
+  Authorization: sessionStorage.getItem('token') || '',
   'X-User-ID': localStorage.getItem('userId') || ''  // 添加用户ID到请求头
 }
 
@@ -584,7 +599,7 @@ const categoryOptions = [
 ]
 
 // 修改子分类选项
-const subCategoryOptions = {
+const subCategoryOptions: Record<string, { label: string; value: string }[]> = {
   '上装': [
     { label: 'T恤衫', value: 'T恤衫' },
     { label: '衬衫', value: '衬衫' },
@@ -1023,9 +1038,22 @@ const getSeasonName = (season: string): string => {
     'spring_and_autumn': '春秋季',
     'summer': '夏季',
     'autumn': '秋季',
+    'winter': '冬季',
     'all_season': '四季通用'
   }
   return seasonMap[season] || season
+}
+
+const getSubCategory = (item: ClothesItem): string => item.subCategory || item.sub_category || ''
+
+const getSpecificColor = (item: ClothesItem): string => item.subColor || item.sub_color || item.colorName || ''
+
+const getColorValue = (color: string): string => {
+  const palette: Record<string, string> = {
+    黑: '#2f3033', 白: '#ffffff', 灰: '#909399', 红: '#d9534f', 粉: '#f3b7c5',
+    橙: '#e89b4c', 黄: '#e6c84f', 绿: '#67a56b', 蓝: '#4d78b8', 紫: '#8b67a8', 棕: '#8b6b52'
+  }
+  return Object.entries(palette).find(([name]) => color.includes(name))?.[1] || '#c0c4cc'
 }
 
 // 组件卸载时清理
@@ -1083,7 +1111,7 @@ const colorOptions = [
   { label: '白色系', value: '白色系' },
   { label: '灰色系', value: '灰色系' }
 ]
-const subColorOptions = {
+const subColorOptions: Record<string, { label: string; value: string }[]> = {
   '红色系': [
     { label: '粉红色', value: '粉红色' },
     { label: '朱红色', value: '朱红色' },
@@ -1400,6 +1428,16 @@ const handleAdd = () => {
 .detail-row span {
   color: #909399;
   margin-right: 4px;
+}
+
+.color-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin: 0 6px 0 1px;
+  border: 1px solid #dcdfe6;
+  border-radius: 50%;
+  vertical-align: -1px;
 }
 
 /* 对话框和表单样式保持不变 */

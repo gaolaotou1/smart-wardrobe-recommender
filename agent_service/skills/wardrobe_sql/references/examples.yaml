@@ -1,0 +1,227 @@
+version: wardrobe-query-examples-1.0
+
+examples:
+  - user: 我有几件衣服？
+    query_spec:
+      aggregate: count
+      filters: []
+      limit: 1
+
+  - user: 我有几件冬天的外套？
+    query_spec:
+      aggregate: count
+      filters:
+        - {field: garment_role, op: eq, value: outerwear}
+        - {field: season, op: in, value: [winter, all_season]}
+      limit: 1
+
+  - user: 找出适合通勤的上衣
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, style, color, season, occasion]
+      filters:
+        - {field: garment_role, op: eq, value: top}
+        - {field: occasion, op: contains_any, value: [商务交流场合, 正式职业场合]}
+      limit: 20
+
+  - user: 有没有黑色下装？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, color, sub_color]
+      filters:
+        - {field: garment_role, op: eq, value: bottom}
+        - {field: color, op: in, value: [黑色系]}
+      limit: 20
+
+  - user: 列一下所有春秋季衣物
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, season]
+      filters:
+        - {field: season, op: eq, value: spring_and_autumn}
+      limit: 50
+
+  - user: 我的白色衬衫有哪些？
+    query_spec:
+      projection: [id, name, image_url, sub_category, color, sub_color]
+      filters:
+        - {field: sub_category, op: contains, value: 衬衫}
+        - {field: color, op: in, value: [白色系]}
+      limit: 20
+
+  - user: 有哪些适合面试的衣服？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, style, occasion]
+      filters:
+        - {field: occasion, op: contains_any, value: [正式职业场合, 商务交流场合]}
+      limit: 20
+
+  - user: 我有几件夏天可以穿的？
+    query_spec:
+      aggregate: count
+      filters:
+        - {field: season, op: in, value: [summer, all_season]}
+      limit: 1
+
+  - user: 找找蓝色系上装
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, color, sub_color]
+      filters:
+        - {field: category, op: eq, value: 上装}
+        - {field: color, op: in, value: [蓝色系]}
+      limit: 20
+
+  - user: 品牌没记录的衣服有多少？
+    query_spec:
+      aggregate: count
+      filters:
+        - {field: brand, op: is_null, value: null}
+      limit: 1
+
+  - user: 找最近添加的衣服
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, created_at]
+      filters: []
+      order_by:
+        - {field: created_at, direction: desc}
+      limit: 10
+
+  - user: 我有没有羽绒服？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, season, thickness]
+      filters:
+        - {field: sub_category, op: eq, value: 羽绒服}
+      limit: 20
+
+  - user: 正式职业场合的下装有哪些？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, occasion]
+      filters:
+        - {field: garment_role, op: eq, value: bottom}
+        - {field: occasion, op: contains, value: 正式职业场合}
+      limit: 20
+
+  - user: 统计每种风格的数量
+    query_spec:
+      aggregate: count
+      group_by: style
+      filters: []
+      limit: 50
+
+  - user: 统计我的颜色分布
+    query_spec:
+      aggregate: count
+      group_by: color
+      filters: []
+      limit: 50
+
+  - user: 查一下厚款外套
+    query_spec:
+      projection: [id, name, image_url, sub_category, thickness]
+      filters:
+        - {field: garment_role, op: eq, value: outerwear}
+        - {field: thickness, op: in, value: [厚款, 加厚, 加绒]}
+      limit: 20
+
+  - user: 有哪些休闲风衣服？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, style]
+      filters:
+        - {field: style, op: eq, value: 休闲}
+      limit: 20
+
+  - user: 找一找适合旅行度假的套装
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, occasion]
+      filters:
+        - {field: garment_role, op: eq, value: suit}
+        - {field: occasion, op: contains, value: 旅行度假场合}
+      limit: 20
+
+  - user: 看看我的灰色衣物
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, color, sub_color]
+      filters:
+        - {field: color, op: in, value: [灰色系]}
+      limit: 20
+
+  - user: 有没有适合户外运动的薄款？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, occasion, thickness]
+      filters:
+        - {field: occasion, op: contains, value: 户外运动场合}
+        - {field: thickness, op: eq, value: 薄款}
+      limit: 20
+
+  - user: 列出所有套装
+    query_spec:
+      projection: [id, name, image_url, category, sub_category]
+      filters:
+        - {field: garment_role, op: eq, value: suit}
+      limit: 50
+
+  - user: 我有多少下装？
+    query_spec:
+      aggregate: count
+      filters:
+        - {field: garment_role, op: eq, value: bottom}
+      limit: 1
+
+  - user: 找黑白灰这些中性色衣服
+    query_spec:
+      projection: [id, name, image_url, category, color, sub_color]
+      filters:
+        - {field: color, op: in, value: [黑色系, 白色系, 灰色系]}
+      limit: 50
+
+  - user: 棉质上衣有哪些？
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, material]
+      filters:
+        - {field: garment_role, op: eq, value: top}
+        - {field: material, op: eq, value: 棉质}
+      limit: 20
+
+  - user: 找描述里有牛仔的衣服
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, description]
+      text_query: 牛仔
+      filters: []
+      limit: 20
+
+  - user: 我有几件适合日常社交的春秋衣服？
+    query_spec:
+      aggregate: count
+      filters:
+        - {field: occasion, op: contains, value: 日常社交场合}
+        - {field: season, op: eq, value: spring_and_autumn}
+      limit: 1
+
+  - user: 找所有没有厚度记录的衣服
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, thickness]
+      filters:
+        - {field: thickness, op: is_null, value: null}
+      limit: 50
+
+  - user: 看一下白色正式上装
+    query_spec:
+      projection: [id, name, image_url, category, sub_category, color, style]
+      filters:
+        - {field: category, op: eq, value: 上装}
+        - {field: color, op: in, value: [白色系]}
+        - {field: style, op: eq, value: 正式}
+      limit: 20
+
+  - user: 通勤外套有哪些？
+    query_spec:
+      projection: [id, name, image_url, sub_category, occasion]
+      filters:
+        - {field: garment_role, op: eq, value: outerwear}
+        - {field: occasion, op: contains_any, value: [商务交流场合, 正式职业场合]}
+      limit: 20
+
+  - user: 春秋可以面试穿的衣物数量
+    query_spec:
+      aggregate: count
+      filters:
+        - {field: season, op: eq, value: spring_and_autumn}
+        - {field: occasion, op: contains_any, value: [正式职业场合, 商务交流场合]}
+      limit: 1

@@ -37,11 +37,12 @@ const router = createRouter({
 // 路由守卫
 router.beforeEach((to, from, next) => {
   const user = localStorage.getItem('user')
-  if (to.path !== '/login' && !user) {
+  const token = sessionStorage.getItem('token')
+  if (to.path !== '/login' && (!user || !token)) {
     next('/login')
   } else {
     next()
   }
 })
 
-export default router 
+export default router

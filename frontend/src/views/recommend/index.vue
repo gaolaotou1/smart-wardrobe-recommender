@@ -109,7 +109,7 @@
         <!-- 聊天消息区域 -->
         <div class="chat-messages" ref="chatMessagesRef">
           <div v-if="chatMessages.length === 0" class="empty-chat">
-            <el-empty description="选择衣物后，开始与AI助手对话">
+                <el-empty description="直接提问，或先选择衣物作为搭配种子">
               <template #image>
                 <el-icon :size="60" color="#409EFF"><ChatDotRound /></el-icon>
               </template>
@@ -145,35 +145,81 @@
                 </template>
                 <template v-else>
                   <div v-if="typeof message.content === 'object'" class="ai-formatted-response">
-                    <!-- 问题回答部分 -->
-                    <div v-if="message.content.问题回答" class="response-section">
+                    <div class="response-section">
                       <h4>AI 回答</h4>
-                      <p>{{ message.content.问题回答 }}</p>
+                      <p class="agent-message">{{ message.content.message }}</p>
                     </div>
-                    
-                    <!-- 推荐图片部分 -->
-                    <div v-if="message.content.推荐图片 && message.content.推荐图片.length > 0" class="response-section">
-                      <h4>相关图片</h4>
-                      <div class="image-grid">
-                        <div v-for="(img, index) in message.content.推荐图片" :key="index" class="image-item">
-                          <el-image
-                            :src="img"
-                            fit="cover"
-                            :preview-src-list="message.content.推荐图片"
-                            :initial-index="index"
-                            preview-teleported
-                            :hide-on-click-modal="false"
-                          >
+
+                    <div v-if="message.content.cards?.length" class="response-section">
+                      <h4>相关衣物</h4>
+                      <div class="agent-card-list">
+                        <div v-for="item in message.content.cards" :key="item.id" class="agent-card">
+                          <el-image :src="item.image_url" fit="cover" class="agent-card-image">
                             <template #error>
                               <div class="image-error">
                                 <el-icon><Picture /></el-icon>
-                                <span>图片加载失败</span>
                               </div>
                             </template>
                           </el-image>
+                          <div class="agent-card-body">
+                            <strong>#{{ item.id }} {{ item.name }}</strong>
+                            <span>{{ item.category }} · {{ getSeasonName(item.season) }}</span>
+                            <span v-if="item.color || item.style" class="agent-card-attributes">
+                              {{ [item.color, item.subColor || item.sub_color, item.style].filter(Boolean).join(' · ') }}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
+
+                    <div v-if="message.content.outfits?.length" class="response-section">
+                      <h4>穿搭方案</h4>
+                      <div class="outfit-list">
+                        <div v-for="(outfit, outfitIndex) in message.content.outfits" :key="outfit.candidate_id || outfit.id || outfitIndex" class="outfit-result">
+                          <div class="outfit-result-header">
+                            <strong>{{ outfitIndex + 1 }}. {{ outfit.name }}</strong>
+                            <span v-if="outfit.score">匹配度 {{ Math.round(outfit.score * 100) }}%</span>
+                          </div>
+                          <p v-if="outfit.reason">{{ outfit.reason }}</p>
+                          <div class="image-grid">
+                            <div v-for="(item, index) in outfit.clothes" :key="`${outfitIndex}-${item.id}`" class="image-item">
+                              <el-image
+                                :src="item.image_url"
+                                fit="cover"
+                                :preview-src-list="outfit.clothes.map(clothes => clothes.image_url)"
+                                :initial-index="index"
+                                preview-teleported
+                                :hide-on-click-modal="false"
+                              >
+                                <template #error>
+                                  <div class="image-error">
+                                    <el-icon><Picture /></el-icon>
+                                    <span>图片加载失败</span>
+                                  </div>
+                                </template>
+                              </el-image>
+                              <span>#{{ item.id }} {{ item.name }}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <el-alert
+                      v-if="message.content.pending_action"
+                      title="等待确认"
+                      type="warning"
+                      :closable="false"
+                      show-icon
+                      :description="message.content.pending_action.summary || '确认后才会写入已保存穿搭。'"
+                    >
+                      <template #default>
+                        <div class="confirmation-actions">
+                          <el-button type="primary" size="small" @click="decideAction(message.content, 'approve')">确认执行</el-button>
+                          <el-button size="small" @click="decideAction(message.content, 'reject')">取消</el-button>
+                        </div>
+                      </template>
+                    </el-alert>
                   </div>
                   <span v-else>{{ message.content }}</span>
                   <div v-if="message.image" class="message-image">
@@ -203,7 +249,7 @@
               <div class="message-content">
                 <div class="loading-message">
                   <el-icon class="is-loading"><Loading /></el-icon>
-                  <span>正在思考中...</span>
+                  <span>{{ progressLabel }}</span>
                 </div>
               </div>
             </div>
@@ -308,11 +354,12 @@ import {
   Upload,
   Select
 } from '@element-plus/icons-vue'
-import type { ClothesItem, ChatMessage, RecommendRequest } from '@/types'
+import type { ClothesItem, ChatMessage, AgentChatResponse } from '@/types'
 import { useRouter } from 'vue-router'
 
 // 设置 axios 默认配置
 axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || ''
+const router = useRouter()
 
 // 衣物列表
 const clothesList = ref<ClothesItem[]>([])
@@ -331,9 +378,14 @@ const userInput = ref('')
 // 是否正在发送消息
 const isLoading = ref(false)
 const chatMessagesRef = ref<HTMLElement | null>(null)
+const sessionId = ref(localStorage.getItem('wardrobeAgentSessionId') || '')
+const progressLabel = ref('正在理解你的问题')
+const AGENT_API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL || 'http://127.0.0.1:8090'
+const showAddDialog = ref(false)
 
 // 添加上传图片相关的状态
 const uploadedImage = ref('')
+const uploadedImageId = ref('')
 const isUploading = ref(false)
 
 // 添加上传进度
@@ -474,11 +526,9 @@ const handleImageUpload = async (options: any) => {
     isUploading.value = true
     uploadProgress.value = 0
 
-    // 创建 FormData
     const formData = new FormData()
     formData.append('file', file)
-    // 通过后端代理上传到图床，避免在前端暴露图床 token
-    const response = await axios.post('/api/upload-to-imgbed', formData, {
+    const response = await axios.post(`${AGENT_API_BASE_URL}/api/chat/v2/uploads`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
@@ -489,8 +539,9 @@ const handleImageUpload = async (options: any) => {
       }
     })
 
-    if (response.status === 200 && !response.data.err) {
-      uploadedImage.value = response.data.url
+    if (response.status === 200 && response.data.upload_id) {
+      uploadedImage.value = URL.createObjectURL(file)
+      uploadedImageId.value = response.data.upload_id
       ElMessage.success('图片上传成功')
     } else {
       throw new Error(response.data.msg || '上传失败')
@@ -506,7 +557,9 @@ const handleImageUpload = async (options: any) => {
 
 // 移除已上传的图片
 const removeImage = () => {
+  if (uploadedImage.value.startsWith('blob:')) URL.revokeObjectURL(uploadedImage.value)
   uploadedImage.value = ''
+  uploadedImageId.value = ''
 }
 
 // 修改发送消息函数
@@ -544,72 +597,58 @@ const sendMessage = async () => {
       return
     }
     
-    // 准备请求数据
-    const requestData = {
-      question: message,
-      user_id: userId,
-      image_url: uploadedImage.value,
-      clothes_images: [] as string[]  // 添加衣物图片数组
+    const token = sessionStorage.getItem('token')
+    if (!token) {
+      ElMessage.warning('请重新登录')
+      router.push('/login')
+      return
+    }
+    if (!sessionId.value) {
+      const sessionResponse = await fetch(`${AGENT_API_BASE_URL}/api/chat/v2/sessions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: null })
+      })
+      if (!sessionResponse.ok) throw new Error('创建 Agent 会话失败')
+      const session = await sessionResponse.json()
+      sessionId.value = session.session_id
+      localStorage.setItem('wardrobeAgentSessionId', session.session_id)
     }
 
-    // 如果选择了衣物，添加衣物信息和图片链接
-    if (selectedClothes.value.length > 0) {
-      requestData.clothes = selectedClothes.value.map(item => ({
-        id: item.id,
-        name: item.name,
-        category: item.category,
-        style: item.style,
-        color: item.colorName || item.color,
-        season: getSeasonName(item.season),
-        material: item.material,
-        occasions: item.occasions || [],
-        description: item.description
-      }))
-      // 添加所有选中衣物的图片链接
-      requestData.clothes_images = selectedClothes.value.map(item => item.image_url)
+    const requestData = {
+      client_message_id: crypto.randomUUID(),
+      text: message,
+      attachments: uploadedImageId.value ? [{ type: 'image', upload_id: uploadedImageId.value }] : [],
+      selected_clothes_ids: selectedClothes.value.map(item => item.id)
     }
-    
-    // 发送请求到后端
-    const response = await axios.post('/api/recommend', requestData)
-    
-    if (response.data.code === 200) {
-      if (response.data.message) {
-        // 如果有message字段，说明是提示信息
-        ElMessage.warning(response.data.message)
-        // 添加AI提示消息
-        chatMessages.value.push({
-          role: 'assistant',
-          content: response.data.message,
-          timestamp: new Date()
-        })
-      } else {
-        // 正常的AI回复
-        const assistantMessage: ChatMessage = {
-          role: 'assistant',
-          content: response.data.data,
-          timestamp: new Date(),
-          image: response.data.image_url
-        }
-        chatMessages.value.push(assistantMessage)
+    const response = await fetch(`${AGENT_API_BASE_URL}/api/chat/v2/sessions/${sessionId.value}/messages/stream`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestData)
+    })
+    if (!response.ok || !response.body) throw new Error(`Agent 请求失败（${response.status}）`)
+    await consumeSse(response, (event, data) => {
+      if (event === 'progress') progressLabel.value = data.label
+      if (event === 'completed') {
+        const agentResponse = data.answer as AgentChatResponse
+        chatMessages.value.push({ role: 'assistant', content: agentResponse, timestamp: new Date() })
       }
-      
-      // 清除已上传的图片
-      uploadedImage.value = ''
-    } else {
-      throw new Error(response.data.message || '获取回复失败')
-    }
+    })
+    uploadedImage.value = ''
+    uploadedImageId.value = ''
   } catch (error) {
     console.error('获取AI回复失败:', error)
+    const message = error instanceof Error ? error.message : '抱歉，我遇到了一些问题，无法回答您的问题。请稍后再试。'
     
     // 添加错误消息
     chatMessages.value.push({
       role: 'assistant',
-      content: error.message || '抱歉，我遇到了一些问题，无法回答您的问题。请稍后再试。',
+      content: message,
       timestamp: new Date()
     })
     
     // 显示错误提示
-    ElMessage.error(error.message || '获取回复失败，请重试')
+    ElMessage.error(message || '获取回复失败，请重试')
   } finally {
     isLoading.value = false
     
@@ -619,9 +658,64 @@ const sendMessage = async () => {
   }
 }
 
+const decideAction = async (response: AgentChatResponse, decision: 'approve' | 'reject') => {
+  const action = response.pending_action
+  const token = sessionStorage.getItem('token')
+  if (!action || !token || !sessionId.value) return
+  try {
+    const result = await fetch(`${AGENT_API_BASE_URL}/api/chat/v2/actions/${action.action_id}/decision`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        decision,
+        session_id: sessionId.value,
+        expected_payload_hash: action.payload_hash,
+        client_decision_id: crypto.randomUUID()
+      })
+    })
+    if (!result.ok) throw new Error(`操作失败（${result.status}）`)
+    const answer = await result.json() as AgentChatResponse
+    response.pending_action = null
+    chatMessages.value.push({ role: 'assistant', content: answer, timestamp: new Date() })
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '操作失败')
+  }
+}
+
+const consumeSse = async (response: Response, onEvent: (event: string, data: any) => void) => {
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() || ''
+    for (const frame of frames) {
+      const event = frame.split('\n').find(line => line.startsWith('event:'))?.slice(6).trim()
+      const data = frame.split('\n').find(line => line.startsWith('data:'))?.slice(5).trim()
+      if (event && data) onEvent(event, JSON.parse(data))
+    }
+    if (done) break
+  }
+}
+
 // 清空对话
-const clearChat = () => {
+const clearChat = async () => {
+  const token = sessionStorage.getItem('token')
+  if (sessionId.value && token) {
+    const response = await fetch(`${AGENT_API_BASE_URL}/api/chat/v2/sessions/${sessionId.value}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!response.ok && response.status !== 404) {
+      ElMessage.error('清空会话失败')
+      return
+    }
+  }
   chatMessages.value = []
+  sessionId.value = ''
+  localStorage.removeItem('wardrobeAgentSessionId')
 }
 
 // 滚动到底部
@@ -916,6 +1010,76 @@ const handleAddClothes = () => {
   justify-content: center;
   background: #f5f7fa;
   color: #909399;
+}
+
+.agent-message {
+  white-space: pre-line;
+  line-height: 1.7;
+}
+
+.agent-card-list,
+.outfit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-card {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.agent-card-image {
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  background: #f5f7fa;
+}
+
+.agent-card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #606266;
+}
+
+.agent-card-body strong {
+  color: #303133;
+  font-size: 13px;
+}
+
+.outfit-result {
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.outfit-result-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #303133;
+  font-size: 14px;
+}
+
+.outfit-result-header span {
+  flex-shrink: 0;
+  color: #67c23a;
+  font-size: 12px;
+}
+
+.outfit-result p {
+  margin: 8px 0;
+  color: #606266;
+  line-height: 1.6;
 }
 
 .image-placeholder .el-icon {

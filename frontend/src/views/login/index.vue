@@ -121,9 +121,11 @@ const handleLogin = async () => {
       })
       
       // 存储用户信息
-      localStorage.setItem('user', JSON.stringify(res.data.data))
+      const { token, ...user } = res.data.data
+      localStorage.setItem('user', JSON.stringify(user))
       localStorage.setItem('userId', res.data.data.id)
-      localStorage.setItem('token', res.data.data.token)
+      sessionStorage.setItem('token', token)
+      localStorage.removeItem('token')
       
       // 记住登录信息
       if (loginForm.remember) {

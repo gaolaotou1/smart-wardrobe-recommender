@@ -345,6 +345,10 @@ interface Outfit {
   clothes: Clothes[]
 }
 
+interface UploadRequestOptions {
+  file: File
+}
+
 // 表单引用
 const formRef = ref<FormInstance>()
 
@@ -414,9 +418,9 @@ const getOutfitList = async () => {
     const res = await axios.get(`/api/outfits?user_id=${userId}`)
     if (res.data.code === 200) {
       // 处理每个穿搭的衣物列表，确保不重复
-      outfitList.value = res.data.data.map(outfit => ({
+      outfitList.value = res.data.data.map((outfit: Outfit) => ({
         ...outfit,
-        clothes: Array.from(new Map(outfit.clothes.map(item => [item.id, item])).values())
+        clothes: Array.from(new Map(outfit.clothes.map((item: Clothes) => [item.id, item])).values())
       }))
     }
   } catch (error) {
@@ -448,14 +452,14 @@ const initData = async () => {
 // 修改 filteredClothes 计算属性
 const filteredClothes = computed(() => {
   if (!clothesSearchKeyword.value) return clothesList.value
-  return clothesList.value.filter(item => 
+  return clothesList.value.filter((item: Clothes) =>
     item.name.toLowerCase().includes(clothesSearchKeyword.value.toLowerCase()) ||
     item.category.toLowerCase().includes(clothesSearchKeyword.value.toLowerCase())
   )
 })
 
 // 检查衣物是否已选择
-const isSelected = (item) => {
+const isSelected = (item: Clothes) => {
   return selectedClothes.value.some(selected => selected.id === item.id)
 }
 
@@ -473,7 +477,7 @@ const toggleClothes = (item: Clothes) => {
 }
 
 // 移除已选择的衣物
-const removeClothes = (index) => {
+const removeClothes = (index: number) => {
   selectedClothes.value.splice(index, 1)
 }
 
@@ -483,7 +487,7 @@ const confirmSelection = () => {
 }
 
 // 处理图片上传成功
-const handleImageSuccess = async (options) => {
+const handleImageSuccess = async (options: UploadRequestOptions) => {
   try {
     const file = options.file
     if (!file) {
@@ -527,7 +531,7 @@ const handleImageSuccess = async (options) => {
 }
 
 // 图片上传前的验证
-const beforeImageUpload = (file) => {
+const beforeImageUpload = (file: File) => {
   const isImage = file.type.startsWith('image/')
   const isLt2M = file.size / 1024 / 1024 < 2
 
@@ -559,12 +563,12 @@ const openCreateDialog = () => {
 }
 
 // 处理编辑
-const handleEdit = (outfit) => {
+const handleEdit = (outfit: Outfit) => {
   editingOutfit.value = outfit
   outfitForm.name = outfit.name
   outfitForm.description = outfit.description
   outfitForm.image_url = outfit.image_url
-  selectedClothes.value = outfit.clothes.map(item => ({
+  selectedClothes.value = outfit.clothes.map((item: Clothes) => ({
     ...item,
     position: item.position
   }))
@@ -572,12 +576,14 @@ const handleEdit = (outfit) => {
 }
 
 // 处理删除
-const handleDelete = async (id) => {
+const handleDelete = async (id: number) => {
   try {
     await ElMessageBox.confirm('确定要删除这个穿搭吗？', '提示', {
       type: 'warning'
     })
-    const res = await axios.delete(`/api/outfits/${id}`)
+    const res = await axios.delete(`/api/outfits/${id}`, {
+      params: { user_id: localStorage.getItem('userId') || '' }
+    })
     if (res.data.code === 200) {
       ElMessage.success('删除成功')
       getOutfitList()

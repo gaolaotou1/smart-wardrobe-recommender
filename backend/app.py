@@ -1,6 +1,8 @@
 import json
 import os
-from datetime import datetime
+import uuid
+from io import BytesIO
+from datetime import datetime, timedelta
 
 import cv2
 import jwt
@@ -11,10 +13,11 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torchvision.transforms as T
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 from rembg import remove
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -54,11 +57,52 @@ db_config = {
     'charset': os.environ.get('DB_CHARSET', 'utf8mb4')
 }
 
+
 ARK_API_URL = os.environ.get('ARK_API_URL', '')
 ARK_API_TOKEN = os.environ.get('ARK_API_TOKEN', '')
-ARK_MODEL = os.environ.get('ARK_MODEL', 'doubao-1-5-vision-pro-32k-250115')
+ARK_MODEL = os.environ.get('ARK_MODEL', 'doubao-seed-2-0-lite-260428')
 SUPERBED_UPLOAD_URL = os.environ.get('SUPERBED_UPLOAD_URL', '')
 SUPERBED_TOKEN = os.environ.get('SUPERBED_TOKEN', '')
+IMAGE_STORAGE_MODE = os.environ.get('IMAGE_STORAGE_MODE', 'local')
+JWT_SECRET = os.environ.get('JWT_SECRET', '')
+JWT_ALGORITHM = 'HS256'
+
+
+def create_access_token(user):
+    if not JWT_SECRET or JWT_SECRET == 'replace_with_a_long_random_secret':
+        raise RuntimeError('JWT_SECRET 未配置')
+    payload = {
+        'sub': str(user['id']),
+        'username': user['username'],
+        'iat': datetime.utcnow(),
+        'exp': datetime.utcnow() + timedelta(hours=int(os.environ.get('JWT_TTL_HOURS', '8'))),
+        'jti': str(uuid.uuid4())
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+@app.before_request
+def authenticate_api_request():
+    if request.method == 'OPTIONS' or request.endpoint in {'login', 'register', 'static'}:
+        return None
+    if not request.path.startswith('/api/'):
+        return None
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    if not token or not JWT_SECRET:
+        return jsonify({'code': 401, 'message': '请先登录'}), 401
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        g.user_id = int(payload['sub'])
+    except (jwt.PyJWTError, KeyError, ValueError):
+        return jsonify({'code': 401, 'message': '登录已失效，请重新登录'}), 401
+    return None
+
+
+def password_matches(raw_password, stored_password):
+    if stored_password.startswith(('pbkdf2:', 'scrypt:')):
+        return check_password_hash(stored_password, raw_password)
+    return raw_password == stored_password
+
 
 # 文件上传配置
 UPLOAD_FOLDER = os.path.join(STATIC_FOLDER, 'uploads')
@@ -100,14 +144,34 @@ def upload_to_imgbed():
     if file.filename == '':
         return jsonify({'err': 1, 'msg': '没有选择文件'}), 400
 
+    content = file.read(10 * 1024 * 1024 + 1)
+    if not content or len(content) > 10 * 1024 * 1024:
+        return jsonify({'err': 1, 'msg': '图片大小必须在 1 B 到 10 MB 之间'}), 400
     try:
-        filename = secure_filename(file.filename)
-        content_type = file.mimetype or 'image/png'
-        response = upload_image_to_imgbed(file.stream, filename, content_type)
-        return jsonify(response.json()), response.status_code
-    except Exception as e:
-        print("上传到图床失败:", str(e))
-        return jsonify({'err': 1, 'msg': str(e)}), 500
+        image = Image.open(BytesIO(content))
+        image.verify()
+    except (OSError, ValueError):
+        return jsonify({'err': 1, 'msg': '不是有效图片'}), 400
+
+    filename = secure_filename(file.filename)
+    content_type = file.mimetype or 'image/png'
+    if IMAGE_STORAGE_MODE == 'superbed':
+        try:
+            response = upload_image_to_imgbed(BytesIO(content), filename, content_type)
+            if response.ok and not response.json().get('err'):
+                return jsonify(response.json())
+        except (requests.RequestException, ValueError, RuntimeError) as error:
+            print("图床不可用，已改用本地存储:", error.__class__.__name__)
+
+    suffix = os.path.splitext(filename)[1].lower()
+    if suffix not in {'.jpg', '.jpeg', '.png'}:
+        suffix = '.png'
+    local_name = f"upload_{uuid.uuid4().hex}{suffix}"
+    local_path = os.path.join(app.config['PROCESSED_FOLDER'], local_name)
+    with open(local_path, 'wb') as target:
+        target.write(content)
+    url = request.host_url.rstrip('/') + f'/static/processed/{local_name}'
+    return jsonify({'err': 0, 'url': url, 'storage': 'local'})
 
 def calculate_image_hash(image_path):
     """
@@ -147,16 +211,19 @@ def login():
         conn = pymysql.connect(**db_config)
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
-        sql = "SELECT id, username FROM users WHERE username=%s AND password=%s"
-        cursor.execute(sql, (username, password))
+        sql = "SELECT id, username, password FROM users WHERE username=%s"
+        cursor.execute(sql, (username,))
         result = cursor.fetchone()
         
-        if result:
-            # 生成token
-            token = {
-                'id': result['id'],
-                'username': result['username']
-            }
+        if result and password_matches(password, result['password']):
+            if not result['password'].startswith(('pbkdf2:', 'scrypt:')):
+                cursor.execute(
+                    "UPDATE users SET password=%s WHERE id=%s",
+                    (generate_password_hash(password), result['id'])
+                )
+                conn.commit()
+
+            token = create_access_token(result)
             
             return jsonify({
                 'code': 200,
@@ -164,7 +231,7 @@ def login():
                 'data': {
                     'id': result['id'],
                     'username': result['username'],
-                    'token': json.dumps(token)
+                    'token': token
                 }
             })
         else:
@@ -192,7 +259,7 @@ def get_clothes():
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
         # 获取查询参数
-        user_id = request.args.get('user_id')
+        user_id = g.user_id
         keyword = request.args.get('keyword', '')
         category = request.args.get('category', '')
         season = request.args.get('season', '')
@@ -242,7 +309,7 @@ def get_clothes():
 def add_clothes():
     try:
         data = request.get_json()
-        user_id = data.get('user_id')
+        user_id = g.user_id
         if not user_id:
             return jsonify({'code': 400, 'message': '用户ID不能为空'})
         conn = pymysql.connect(**db_config)
@@ -277,18 +344,6 @@ def add_clothes():
     finally:
         cursor.close()
         conn.close()
-
-# 获取用户ID的辅助函数
-def get_user_id():
-    user_str = request.headers.get('Authorization')
-    if user_str:
-        try:
-            user_data = json.loads(user_str)
-            return user_data.get('id')
-        except:
-            return None
-    return None
-
 
 # 添加 AI 分析函数
 def analyze_image_with_ai(image_url):
@@ -446,6 +501,15 @@ def upload_file():
                 # 清理临时文件
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
+
+                if IMAGE_STORAGE_MODE != 'superbed':
+                    return jsonify({
+                        'code': 400,
+                        'message': '检测到非衣物图片，请上传衣物照片',
+                        'is_clothes': False,
+                        'confidence': confidence,
+                        'url': f'/static/processed/{processed_filename}'
+                    })
                 
                 with open(processed_path, 'rb') as img_file:
                     response = upload_image_to_imgbed(img_file, processed_filename)
@@ -484,7 +548,7 @@ def upload_file():
             cursor = conn.cursor()
             
             # 从请求头中获取用户ID
-            user_id = request.headers.get('X-User-ID')
+            user_id = g.user_id
             if not user_id:
                 print("未找到用户ID")
                 return jsonify({
@@ -545,6 +609,14 @@ def upload_file():
             # 清理临时文件
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+
+            if IMAGE_STORAGE_MODE != 'superbed':
+                return jsonify({
+                    'code': 200,
+                    'message': '上传成功',
+                    'url': f'/static/processed/{processed_filename}',
+                    'hash': hash_value
+                })
             
             # 上传到图床并进行 AI 分析
             with open(processed_path, 'rb') as img_file:
@@ -599,7 +671,7 @@ def serve_static(filename):
 @app.route('/api/clothes/statistics', methods=['GET'])
 def get_clothes_statistics():
     try:
-        user_id = request.args.get('user_id')  # 添加用户ID参数
+        user_id = g.user_id
         if not user_id:  # 如果没有用户ID，返回默认值
             return jsonify({
                 'code': 200,
@@ -667,7 +739,7 @@ def get_outfits():
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
         # 获取当前用户ID
-        user_id = request.args.get('user_id')
+        user_id = g.user_id
         if not user_id:
             return jsonify({
                 'code': 400,
@@ -692,12 +764,13 @@ def get_outfits():
         for outfit in outfits:
             if outfit['clothes_ids']:
                 clothes_ids = outfit['clothes_ids'].split(',')
-                cursor.execute("""
+                placeholders = ','.join(['%s'] * len(clothes_ids))
+                cursor.execute(f"""
                     SELECT c.*, oc.position
                     FROM clothes c
                     JOIN outfit_clothes oc ON c.id = oc.clothes_id
-                    WHERE c.id IN (%s)
-                """ % ','.join(['%s'] * len(clothes_ids)), clothes_ids)
+                    WHERE c.user_id = %s AND c.id IN ({placeholders})
+                """, [user_id, *clothes_ids])
                 outfit['clothes'] = cursor.fetchall()
             else:
                 outfit['clothes'] = []
@@ -726,16 +799,23 @@ def create_outfit():
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
         data = request.get_json()
+        user_id = g.user_id
+        if not user_id:
+            return jsonify({'code': 400, 'message': '缺少用户ID'})
         
         # 创建穿搭记录
         cursor.execute("""
             INSERT INTO outfits (name, description, image_url, user_id)
             VALUES (%s, %s, %s, %s)
-        """, (data['name'], data['description'], data['image_url'], data['user_id']))
+        """, (data['name'], data['description'], data['image_url'], user_id))
         outfit_id = cursor.lastrowid
         
         # 创建穿搭衣物关联
         for clothes in data['clothes']:
+            cursor.execute("SELECT id FROM clothes WHERE id = %s AND user_id = %s", (clothes['id'], user_id))
+            if not cursor.fetchone():
+                conn.rollback()
+                return jsonify({'code': 400, 'message': '穿搭中包含不存在的衣物'})
             cursor.execute("""
                 INSERT INTO outfit_clothes (outfit_id, clothes_id, position)
                 VALUES (%s, %s, %s)
@@ -766,19 +846,30 @@ def update_outfit(outfit_id):
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
         data = request.get_json()
+        user_id = g.user_id
+        if not user_id:
+            return jsonify({'code': 400, 'message': '缺少用户ID'})
+
+        cursor.execute("SELECT id FROM outfits WHERE id = %s AND user_id = %s", (outfit_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'code': 404, 'message': '穿搭不存在'})
         
         # 更新穿搭记录
         cursor.execute("""
             UPDATE outfits
             SET name = %s, description = %s, image_url = %s
-            WHERE id = %s
-        """, (data['name'], data['description'], data['image_url'], outfit_id))
+            WHERE id = %s AND user_id = %s
+        """, (data['name'], data['description'], data['image_url'], outfit_id, user_id))
         
         # 删除旧的衣物关联
         cursor.execute("DELETE FROM outfit_clothes WHERE outfit_id = %s", (outfit_id,))
         
         # 创建新的衣物关联
         for clothes in data['clothes']:
+            cursor.execute("SELECT id FROM clothes WHERE id = %s AND user_id = %s", (clothes['id'], user_id))
+            if not cursor.fetchone():
+                conn.rollback()
+                return jsonify({'code': 400, 'message': '穿搭中包含不存在的衣物'})
             cursor.execute("""
                 INSERT INTO outfit_clothes (outfit_id, clothes_id, position)
                 VALUES (%s, %s, %s)
@@ -807,9 +898,12 @@ def delete_outfit(outfit_id):
     try:
         conn = pymysql.connect(**db_config)
         cursor = conn.cursor(pymysql.cursors.DictCursor)
+        user_id = g.user_id
+        if not user_id:
+            return jsonify({'code': 400, 'message': '缺少用户ID'})
         
         # 删除穿搭记录
-        cursor.execute("DELETE FROM outfits WHERE id = %s", (outfit_id,))
+        cursor.execute("DELETE FROM outfits WHERE id = %s AND user_id = %s", (outfit_id, user_id))
         conn.commit()
         
         return jsonify({
@@ -1070,7 +1164,7 @@ def recommend_outfit():
 @app.route('/api/dashboard', methods=['GET'])
 def get_dashboard_data():
     try:
-        user_id = request.args.get('user_id')
+        user_id = g.user_id
         if not user_id:
             return jsonify({
                 'code': 400,
@@ -1228,7 +1322,7 @@ def get_dashboard_data():
 @app.route('/api/clothes/category-distribution', methods=['GET'])
 def get_category_distribution():
     try:
-        user_id = request.args.get('user_id')
+        user_id = g.user_id
         if not user_id:
             return jsonify({
                 'code': 200,
@@ -1328,7 +1422,7 @@ def register():
         # 创建新用户
         cursor.execute(
             'INSERT INTO users (username, password) VALUES (%s, %s)',
-            (username, password)
+            (username, generate_password_hash(password))
         )
         conn.commit()
         

@@ -1,0 +1,5 @@
+{"input":"我有几件冬天通勤外套","route":"wardrobe_query","aggregate":"count"}
+{"input":"帮我搭一套面试穿搭","route":"outfit_recommendation"}
+{"input":"把第一套保存为周一面试","route":"outfit_management"}
+{"input":"你记得我什么偏好","route":"fashion_qa"}
+{"input":"藏蓝配什么颜色","route":"fashion_qa"}

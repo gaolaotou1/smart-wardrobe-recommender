@@ -1,0 +1,70 @@
+version: wardrobe-values-1.0
+
+categories:
+  - 上装
+  - 下装
+  - 套装
+
+outerwear_sub_categories:
+  - 外套
+  - 夹克
+  - 西装
+  - 风衣
+  - 大衣
+  - 羽绒服
+  - 棉服
+  - 西装外套
+  - 开衫
+  - 防晒外套
+
+garment_role:
+  top:
+    synonyms: [上衣, 上装, T恤, 衬衫, 卫衣, 毛衣, 针织衫]
+  bottom:
+    synonyms: [下装, 裤子, 长裤, 短裤, 半身裙]
+  suit:
+    synonyms: [套装, 连体装, 连衣裙]
+  outerwear:
+    synonyms: [外套, 夹克, 西装, 风衣, 大衣, 羽绒服, 西装外套]
+
+season:
+  spring_and_autumn:
+    synonyms: [春天, 秋天, 春秋, 换季]
+  summer:
+    synonyms: [夏天, 夏季, 炎热]
+  winter:
+    synonyms: [冬天, 冬季, 寒冷]
+    include: [all_season]
+  all_season:
+    synonyms: [四季, 全年]
+
+occasion:
+  旅行度假场合:
+    synonyms: [旅行, 度假, 旅游]
+  都市休闲场合:
+    synonyms: [休闲, 逛街, 日常, 都市]
+  户外运动场合:
+    synonyms: [运动, 户外, 跑步, 健身]
+  日常社交场合:
+    synonyms: [社交, 聚会, 约会, 见朋友]
+  商务交流场合:
+    synonyms: [通勤, 商务, 上班, 职场]
+  正式职业场合:
+    synonyms: [正式, 面试, 会议, 职业]
+
+color:
+  黑色系: [黑, 深色]
+  白色系: [白, 米白, 浅色]
+  灰色系: [灰, 中性]
+  蓝色系: [蓝, 藏蓝, 牛仔]
+  红色系: [红]
+  黄色系: [黄, 米色, 卡其]
+  绿色系: [绿]
+  紫色系: [紫]
+
+style:
+  简约: [简约, 极简, 利落]
+  休闲: [休闲, 日常, 松弛]
+  正式: [正式, 商务, 面试]
+  优雅: [优雅, 温柔]
+  运动: [运动, 健身]

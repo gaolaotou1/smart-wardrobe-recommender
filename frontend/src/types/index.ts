@@ -5,13 +5,19 @@ export interface ClothesItem {
   description?: string;
   image_url: string;
   category: string;
+  sub_category?: string;
+  subCategory?: string;
   brand?: string;
   style?: string;
   color?: string;
+  sub_color?: string;
+  subColor?: string;
   colorName?: string;
   season: string;
   material?: string;
   occasions?: string[];
+  thickness?: string;
+  hash?: string;
   tags?: string[];
   createdAt?: string;
   updatedAt?: string;
@@ -60,9 +66,12 @@ export interface OccasionTag {
 export interface ClothesForm {
   id: string | number;
   name: string;
-  categories: string[];
+  categories?: string[];
+  category: string;
+  subCategory: string;
   brand: string;
   color: string;
+  subColor: string;
   colorName: string;
   season: string;
   occasions: string[];
@@ -70,6 +79,8 @@ export interface ClothesForm {
   material: string;
   image_url: string;
   description: string;
+  thickness: string;
+  hash: string;
 }
 
 // AI分析结果类型
@@ -81,6 +92,7 @@ export interface AIAnalysis {
   material: string;
   occasions: string[];
   description: string;
+  thickness: string;
 }
 
 // 步骤类型
@@ -92,8 +104,38 @@ export interface Step {
 // 聊天消息类型
 export interface ChatMessage {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | AgentChatResponse;
   timestamp: Date;
+  image?: string;
+}
+
+export interface AgentOutfit {
+  candidate_id?: string;
+  id?: number;
+  name: string;
+  reason?: string;
+  score?: number;
+  clothes: ClothesItem[];
+}
+
+export interface AgentChatResponse {
+  session_id: string;
+  route: string;
+  answer: string;
+  message: string;
+  cards: ClothesItem[];
+  outfits: AgentOutfit[];
+  pending_action?: {
+    action_id: string;
+    kind: string;
+    summary: string;
+    name: string;
+    clothes_ids: number[];
+    expires_at: number;
+    payload_hash: string;
+  } | null;
+  recommended_images: string[];
+  analysis?: Record<string, unknown> | null;
 }
 
 // 推荐请求类型
@@ -110,4 +152,4 @@ export interface RecommendRequest {
     description?: string;
   }[];
   question: string;
-} 
+}
